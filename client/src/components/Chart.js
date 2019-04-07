@@ -1,10 +1,13 @@
 import React from 'react';
+import socketIOClient from 'socket.io-client';
 import * as d3 from 'd3';
+
+const endpoint = 'http://localhost:7777';
 
 class Chart extends React.Component {
   state = {
     marketStatus: [],
-    chartProps: {}
+    chartProps: {},
   };
 
   componentDidMount = async () => {
@@ -12,11 +15,17 @@ class Chart extends React.Component {
     const marketStatus = await res.json();
     this.formatDate(marketStatus);
     this.buildChart();
+    const socket = socketIOClient(endpoint);
+    socket.on('market', data => {
+      this.state.marketStatus.push(data);
+      this.formatDate(this.state.marketStatus);
+      this.updateChart();
+    });
   }
 
   formatDate = marketStatus => {
     marketStatus.forEach(ms => {
-      if (ms.date === 'string') {
+      if (typeof ms.date === 'string') {
         ms.date = this.parseDate(ms.date);
       }
     });
@@ -67,8 +76,6 @@ class Chart extends React.Component {
         return yScale(d.open);
       });
 
-    console.log('line(x)', valueline(marketStatus));
-
     const svg = d3.select('body')
       .append('svg')
       .attr('width', width + margin.left + margin.right)
@@ -77,17 +84,17 @@ class Chart extends React.Component {
       .attr('transform', `translate(${margin.left}, ${margin.top})`);
 
     svg.append('path')
-      .attr('class', 'line')
+      .attr('class', 'line line1')
       .attr('d', valueline(marketStatus))
       .style('fill', 'none')
       .style('stroke', 'black')
       .style('stroke-width', 2);
 
     svg.append('path')
-      .attr('class', 'line')
+      .attr('class', 'line line2')
       .attr('d', valueline2(marketStatus))
       .style('fill', 'none')
-      .style('stroke', 'black')
+      .style('stroke', 'green')
       .style('stroke-width', 2);
 
     svg.append('g')
@@ -100,12 +107,40 @@ class Chart extends React.Component {
       .call(yAxis);
 
     chartProps.svg = svg;
+    chartProps.x = xScale;
+    chartProps.y = yScale;
     chartProps.valueline = valueline;
     chartProps.valueline2 = valueline2;
     chartProps.xAxis = xAxis;
     chartProps.yAxis = yAxis;
 
     this.setState({ chartProps });
+  }
+
+  updateChart() {
+    const { chartProps, marketStatus } = this.state;
+
+    chartProps.x.domain(d3.extent(marketStatus, d => {
+      if (d.date instanceof Date) {
+        return d.date.getTime();
+      }
+    }));
+
+    chartProps.y.domain([0, d3.max(marketStatus, d => { return Math.max(d.close, d.open); })]);
+
+    chartProps.svg.transition();
+
+    chartProps.svg.select('.line.line1') // update the line
+      .attr('d', chartProps.valueline(marketStatus));
+
+    chartProps.svg.select('.line.line2') // update the line
+      .attr('d', chartProps.valueline2(marketStatus));
+
+    chartProps.svg.select('.x.axis')
+      .call(chartProps.xAxis);
+
+    chartProps.svg.select('.y.axis')
+      .call(chartProps.yAxis);
   }
   
   render() {
